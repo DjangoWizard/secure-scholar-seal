@@ -1,0 +1,30 @@
+{
+  "buildCommand": "npm run build",
+  "outputDirectory": "dist",
+  "framework": "vite",
+  "installCommand": "npm install",
+  "devCommand": "npm run dev",
+  "rewrites": [
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
+    }
+  ],
+  "headers": [
+    {
+      "source": "/assets/(.*)",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=31536000, immutable"
+        }
+      ]
+    }
+  ],
+  "env": {
+    "NEXT_PUBLIC_CHAIN_ID": "11155111",
+    "NEXT_PUBLIC_RPC_URL": "https://sepolia.infura.io/v3/b18fb7e6ca7045ac83c41157ab93f990",
+    "NEXT_PUBLIC_WALLET_CONNECT_PROJECT_ID": "2ec9743d0d0cd7fb94dee1a7e6d33475",
+    "NEXT_PUBLIC_INFURA_API_KEY": "b18fb7e6ca7045ac83c41157ab93f990"
+  }
+}
