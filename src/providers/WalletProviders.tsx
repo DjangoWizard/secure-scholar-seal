@@ -11,10 +11,10 @@ import { http } from 'viem';
 
 const config = getDefaultConfig({
   appName: 'Secure Scholar Seal',
-  projectId: '2ec9743d0d0cd7fb94dee1a7e6d33475', // WalletConnect Project ID
+  projectId: import.meta.env.VITE_WALLET_CONNECT_PROJECT_ID || 'your-walletconnect-project-id',
   chains: [sepolia],
   transports: {
-    [sepolia.id]: http('https://sepolia.infura.io/v3/b18fb7e6ca7045ac83c41157ab93f990'),
+    [sepolia.id]: http(import.meta.env.VITE_RPC_URL || 'https://sepolia.infura.io/v3/your-infura-key'),
   },
 });
 
