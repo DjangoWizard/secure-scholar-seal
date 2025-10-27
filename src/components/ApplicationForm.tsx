@@ -5,7 +5,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Upload, Lock, FileText, GraduationCap } from 'lucide-react';
+import { Upload, Lock, FileText, GraduationCap, Image, File } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { useAccount, useWriteContract, useWaitForTransactionReceipt } from 'wagmi';
 import { useZamaInstance } from '@/hooks/useZamaInstance';
@@ -55,6 +55,25 @@ export const ApplicationForm = () => {
 
   const removeFile = (index: number) => {
     setSelectedFiles(prev => prev.filter((_, i) => i !== index));
+  };
+
+  // Get file icon based on file type
+  const getFileIcon = (file: File) => {
+    const extension = file.name.split('.').pop()?.toLowerCase();
+    switch (extension) {
+      case 'jpg':
+      case 'jpeg':
+      case 'png':
+      case 'gif':
+      case 'bmp':
+      case 'tiff':
+      case 'webp':
+        return <Image className="h-4 w-4 text-blue-500" />;
+      case 'pdf':
+        return <FileText className="h-4 w-4 text-red-500" />;
+      default:
+        return <File className="h-4 w-4 text-gray-500" />;
+    }
   };
 
   // Handle transaction confirmation
@@ -315,14 +334,17 @@ export const ApplicationForm = () => {
                   </Label>
                   <div className="border-2 border-dashed border-academic-gold/30 rounded-lg p-8 text-center hover:border-academic-gold/50 transition-colors">
                     <Upload className="w-12 h-12 mx-auto mb-4 text-muted-foreground" />
-                    <p className="text-lg font-medium mb-2">Upload Transcripts & Documents</p>
+                    <p className="text-lg font-medium mb-2">Upload Supporting Documents</p>
                     <p className="text-sm text-muted-foreground mb-4">
                       Drag and drop files here, or click to browse
+                    </p>
+                    <p className="text-xs text-muted-foreground mb-4">
+                      Supported formats: PDF, DOC, DOCX, JPG, PNG, GIF, TXT, RTF and more
                     </p>
                     <Input
                       type="file"
                       multiple
-                      accept=".pdf,.doc,.docx"
+                      accept=".pdf,.doc,.docx,.jpg,.jpeg,.png,.gif,.bmp,.tiff,.webp,.txt,.rtf,.odt,.pages"
                       onChange={handleFileChange}
                       className="hidden"
                       id="file-upload"
@@ -347,7 +369,7 @@ export const ApplicationForm = () => {
                         {selectedFiles.map((file, index) => (
                           <div key={index} className="flex items-center justify-between p-3 bg-muted rounded-lg">
                             <div className="flex items-center gap-2">
-                              <FileText className="h-4 w-4 text-primary" />
+                              {getFileIcon(file)}
                               <span className="text-sm">{file.name}</span>
                               <span className="text-xs text-muted-foreground">
                                 ({(file.size / 1024 / 1024).toFixed(2)} MB)
