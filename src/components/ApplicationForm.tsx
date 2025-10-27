@@ -11,9 +11,11 @@ import { useAccount } from 'wagmi';
 import { useZamaInstance } from '@/hooks/useZamaInstance';
 import { useEthersSigner } from '@/hooks/useEthersSigner';
 import { convertHex, getContactInfoValue, getDescriptionValue } from '@/lib/fheUtils';
+import { useFileUpload } from '@/lib/pinata';
 
 export const ApplicationForm = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [formData, setFormData] = useState({
     fullName: '',
     email: '',
@@ -25,8 +27,12 @@ export const ApplicationForm = () => {
   });
   const { toast } = useToast();
   const { address, isConnected } = useAccount();
-  const { instance, isLoading: fheLoading, error: fheError } = useZamaInstance();
+  const { instance, isLoading: fheLoading, error: fheError, isInitialized } = useZamaInstance();
   const signerPromise = useEthersSigner();
+  const { uploadFile, uploadJSON, isUploading, uploadError } = useFileUpload();
+
+  // Contract address - you can set this as an environment variable
+  const CONTRACT_ADDRESS = import.meta.env.VITE_CONTRACT_ADDRESS || '0x0000000000000000000000000000000000000000';
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
@@ -35,6 +41,15 @@ export const ApplicationForm = () => {
 
   const handleSelectChange = (value: string) => {
     setFormData(prev => ({ ...prev, gpa: value }));
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    setSelectedFiles(prev => [...prev, ...files]);
+  };
+
+  const removeFile = (index: number) => {
+    setSelectedFiles(prev => prev.filter((_, i) => i !== index));
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -49,7 +64,7 @@ export const ApplicationForm = () => {
       return;
     }
 
-    if (!instance || !address || !signerPromise) {
+    if (!instance || !address || !signerPromise || !isInitialized) {
       toast({
         title: "Encryption Service Not Ready",
         description: "Please wait for the encryption service to initialize.",
@@ -61,8 +76,53 @@ export const ApplicationForm = () => {
     setIsSubmitting(true);
     
     try {
+      console.log('Starting application submission...');
+      
+      // Upload files to IPFS if any
+      let ipfsHash = '';
+      if (selectedFiles.length > 0) {
+        console.log('Uploading files to IPFS...');
+        const fileHashes: string[] = [];
+        
+        for (const file of selectedFiles) {
+          const hash = await uploadFile(file, {
+            name: file.name,
+            keyvalues: {
+              type: 'scholarship-document',
+              student: formData.fullName,
+              university: formData.university
+            }
+          });
+          fileHashes.push(hash);
+        }
+        
+        // Create a JSON manifest of all files
+        const manifest = {
+          files: selectedFiles.map((file, index) => ({
+            name: file.name,
+            size: file.size,
+            type: file.type,
+            hash: fileHashes[index]
+          })),
+          uploadedAt: new Date().toISOString(),
+          student: formData.fullName,
+          university: formData.university
+        };
+        
+        ipfsHash = await uploadJSON(manifest, {
+          name: `scholarship-application-${formData.fullName}`,
+          keyvalues: {
+            type: 'scholarship-manifest',
+            student: formData.fullName
+          }
+        });
+        
+        console.log('Files uploaded to IPFS:', ipfsHash);
+      }
+
       // Create encrypted input
-      const input = instance.createEncryptedInput(process.env.VITE_CONTRACT_ADDRESS || '', address);
+      console.log('Creating encrypted input...');
+      const input = instance.createEncryptedInput(CONTRACT_ADDRESS, address);
       
       // Add encrypted data
       const gpaValue = formData.gpa === '3.8-4.0' ? 4 : 
@@ -73,12 +133,15 @@ export const ApplicationForm = () => {
       input.add32(BigInt(getContactInfoValue(formData.contactInfo || formData.email))); // Contact info
       input.add32(BigInt(getDescriptionValue(formData.essay))); // Essay content
       
+      console.log('Encrypting data...');
       const encryptedInput = await input.encrypt();
       
       // Convert handles to proper format
       const handles = encryptedInput.handles.map(convertHex);
       const proof = `0x${Array.from(encryptedInput.inputProof)
         .map(b => b.toString(16).padStart(2, '0')).join('')}`;
+      
+      console.log('Encryption completed, handles:', handles);
       
       // Here you would call the smart contract
       // const signer = await signerPromise;
@@ -96,14 +159,14 @@ export const ApplicationForm = () => {
       
       toast({
         title: "Application Sealed & Submitted",
-        description: "Your scholarship application has been encrypted and submitted to the committee.",
+        description: `Your scholarship application has been encrypted and submitted. ${ipfsHash ? `Files uploaded to IPFS: ${ipfsHash}` : ''}`,
       });
       
-    } catch (error) {
+    } catch (error: any) {
       console.error('Submission failed:', error);
       toast({
         title: "Submission Failed",
-        description: "There was an error submitting your application. Please try again.",
+        description: `There was an error submitting your application: ${error.message}`,
         variant: "destructive"
       });
     } finally {
@@ -231,10 +294,61 @@ export const ApplicationForm = () => {
                     <p className="text-sm text-muted-foreground mb-4">
                       Drag and drop files here, or click to browse
                     </p>
-                    <Button variant="outline" type="button" className="border-academic-gold text-academic-primary">
-                      Choose Files
-                    </Button>
+                    <Input
+                      type="file"
+                      multiple
+                      accept=".pdf,.doc,.docx"
+                      onChange={handleFileChange}
+                      className="hidden"
+                      id="file-upload"
+                    />
+                    <Label htmlFor="file-upload">
+                      <Button variant="outline" type="button" className="border-academic-gold text-academic-primary cursor-pointer">
+                        Choose Files
+                      </Button>
+                    </Label>
                   </div>
+                  
+                  {/* File List */}
+                  {selectedFiles.length > 0 && (
+                    <div className="space-y-2">
+                      <Label className="text-sm font-medium">Selected Files:</Label>
+                      <div className="space-y-2">
+                        {selectedFiles.map((file, index) => (
+                          <div key={index} className="flex items-center justify-between p-3 bg-muted rounded-lg">
+                            <div className="flex items-center gap-2">
+                              <FileText className="h-4 w-4 text-primary" />
+                              <span className="text-sm">{file.name}</span>
+                              <span className="text-xs text-muted-foreground">
+                                ({(file.size / 1024 / 1024).toFixed(2)} MB)
+                              </span>
+                            </div>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => removeFile(index)}
+                              className="text-destructive hover:text-destructive"
+                            >
+                              Remove
+                            </Button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  
+                  {isUploading && (
+                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                      <p className="text-blue-800 text-sm">Uploading files to IPFS...</p>
+                    </div>
+                  )}
+                  
+                  {uploadError && (
+                    <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+                      <p className="text-red-800 text-sm">Upload error: {uploadError}</p>
+                    </div>
+                  )}
                 </div>
 
                 <div className="bg-envelope-sealed/50 rounded-lg p-6 border border-academic-gold/20">
@@ -266,7 +380,7 @@ export const ApplicationForm = () => {
                 <Button 
                   type="submit" 
                   size="lg"
-                  disabled={isSubmitting || fheLoading || !isConnected}
+                  disabled={isSubmitting || fheLoading || !isConnected || !isInitialized || isUploading}
                   className="w-full bg-academic-primary hover:bg-academic-seal text-white py-4 text-lg"
                 >
                   {isSubmitting ? (
@@ -274,12 +388,17 @@ export const ApplicationForm = () => {
                       <Lock className="w-5 h-5 mr-2 animate-spin" />
                       Encrypting & Submitting...
                     </>
+                  ) : isUploading ? (
+                    <>
+                      <Upload className="w-5 h-5 mr-2 animate-spin" />
+                      Uploading Files...
+                    </>
                   ) : !isConnected ? (
                     <>
                       <Lock className="w-5 h-5 mr-2" />
                       Connect Wallet First
                     </>
-                  ) : fheLoading ? (
+                  ) : fheLoading || !isInitialized ? (
                     <>
                       <Lock className="w-5 h-5 mr-2 animate-spin" />
                       Loading Encryption Service...

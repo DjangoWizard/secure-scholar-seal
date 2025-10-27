@@ -8,12 +8,16 @@ export default defineConfig({
     host: "::",
     port: 8080,
     headers: {
-      'Cross-Origin-Opener-Policy': 'same-origin',
-      'Cross-Origin-Embedder-Policy': 'require-corp'
+      'Cross-Origin-Opener-Policy': 'unsafe-none',
+      'Cross-Origin-Embedder-Policy': 'unsafe-none',
+      'Cross-Origin-Resource-Policy': 'cross-origin'
     }
   },
   plugins: [react()],
-  define: { global: 'globalThis' },
+  define: { 
+    global: 'globalThis',
+    'process.env': {}
+  },
   optimizeDeps: { 
     include: ['@zama-fhe/relayer-sdk/bundle']
   },
@@ -22,4 +26,17 @@ export default defineConfig({
       "@": path.resolve(__dirname, "./src"),
     },
   },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          vendor: ['react', 'react-dom'],
+          wagmi: ['wagmi', 'viem']
+        }
+      }
+    },
+    target: 'esnext',
+    minify: 'esbuild',
+    sourcemap: false
+  }
 });
