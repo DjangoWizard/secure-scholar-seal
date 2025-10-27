@@ -1,224 +1,309 @@
 import React, { useState, useEffect } from 'react';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
-import { Separator } from '@/components/ui/separator';
-import { 
-  Eye, 
-  EyeOff, 
-  FileText, 
-  GraduationCap, 
-  Calendar, 
-  Shield, 
-  Lock, 
-  Unlock,
-  Download,
-  ExternalLink,
-  RefreshCw
-} from 'lucide-react';
-import { useToast } from '@/hooks/use-toast';
 import { useAccount, useReadContract } from 'wagmi';
 import { useZamaInstance } from '@/hooks/useZamaInstance';
 import { useEthersSigner } from '@/hooks/useEthersSigner';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Loader2, Lock, Unlock, FileText, GraduationCap, ExternalLink, User } from 'lucide-react';
+import { useToast } from '@/hooks/use-toast';
 import contractABI from '@/lib/contractABI.json';
+import { Contract } from 'ethers';
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
+import { Badge } from '@/components/ui/badge';
 
 interface ScholarProfile {
   profileId: string;
-  academicScore: string;
-  verificationLevel: string;
-  reputationScore: string;
+  academicScore: string; // Encrypted bytes32
+  verificationLevel: string; // Encrypted bytes32
+  reputationScore: string; // Encrypted bytes32
+  isVerified: boolean;
+  isActive: boolean;
   name: string;
   institution: string;
   specialization: string;
   scholar: string;
-  isVerified: boolean;
-  isActive: boolean;
   createdAt: string;
   lastUpdated: string;
 }
 
 interface DecryptedData {
-  academicScore: number;
-  verificationLevel: number;
-  reputationScore: number;
+  academicScore?: number;
+  verificationLevel?: number;
+  reputationScore?: number;
 }
 
 export const MyApplication = () => {
+  const { address, isConnected } = useAccount();
+  const { instance, isLoading: fheLoading, error: fheError, isInitialized } = useZamaInstance();
+  const signerPromise = useEthersSigner();
+  const { toast } = useToast();
+
   const [profiles, setProfiles] = useState<ScholarProfile[]>([]);
+  const [isLoadingApplications, setIsLoadingApplications] = useState(false);
+  const [errorApplications, setErrorApplications] = useState<string | null>(null);
   const [decryptedData, setDecryptedData] = useState<Record<string, DecryptedData>>({});
   const [isDecrypting, setIsDecrypting] = useState<Record<string, boolean>>({});
-  const [isLoading, setIsLoading] = useState(false);
   const [expandedProfile, setExpandedProfile] = useState<string | null>(null);
-  
-  const { toast } = useToast();
-  const { address, isConnected } = useAccount();
-  const { instance, isInitialized } = useZamaInstance();
-  const signerPromise = useEthersSigner();
 
-  // Contract address - deployed to Sepolia testnet
-  const CONTRACT_ADDRESS = import.meta.env.VITE_CONTRACT_ADDRESS || '0x7AC73d56fF5be33C2122E10a738072DB7c9FB34c';
+  const CONTRACT_ADDRESS = import.meta.env.VITE_CONTRACT_ADDRESS || '0x4a1390b602B658f5800530A54f3e3d8c67D3bc1F';
 
-  // Mock data for demonstration - in real app, this would come from contract events or subgraph
-  const mockProfiles: ScholarProfile[] = [
-    {
-      profileId: "1",
-      academicScore: "0x29b65c32282d32b7bc4c54c9d7d7ffb7cbd88db1df000000000000aa36a70400",
-      verificationLevel: "0x0000000000000000000000000000000000000000000000000000000000000000",
-      reputationScore: "0x0000000000000000000000000000000000000000000000000000000000000000",
-      name: "John Smith",
-      institution: "Stanford University",
-      specialization: "Computer Science",
-      scholar: address || "0x0000000000000000000000000000000000000000",
-      isVerified: false,
-      isActive: true,
-      createdAt: "2025-10-27T03:02:49.666Z",
-      lastUpdated: "2025-10-27T03:02:49.666Z"
-    }
-  ];
+  // Read profile IDs for the current user
+  const { data: profileIds, isLoading: isLoadingProfileIds, error: profileIdsError } = useReadContract({
+    address: CONTRACT_ADDRESS as `0x${string}`,
+    abi: contractABI.abi,
+    functionName: 'getProfileIdsByScholar',
+    args: address ? [address] : undefined,
+    query: {
+      enabled: !!address && isConnected,
+    },
+  });
 
-  // Load user's applications
+  // Read profile count
+  const { data: profileCount } = useReadContract({
+    address: CONTRACT_ADDRESS as `0x${string}`,
+    abi: contractABI.abi,
+    functionName: 'getProfileCount',
+    query: {
+      enabled: !!CONTRACT_ADDRESS,
+    },
+  });
+
+  // Load user's applications when profileIds change
   useEffect(() => {
-    if (isConnected && address) {
+    if (profileIds && profileIds.length > 0) {
       loadUserApplications();
+    } else {
+      setProfiles([]);
     }
-  }, [isConnected, address]);
+  }, [profileIds]);
 
   const loadUserApplications = async () => {
-    setIsLoading(true);
+    if (!profileIds || profileIds.length === 0) {
+      setProfiles([]);
+      return;
+    }
+
+    setIsLoadingApplications(true);
+    setErrorApplications(null);
+
     try {
-      // In a real application, you would query the contract or use a subgraph
-      // For now, we'll use mock data
-      setProfiles(mockProfiles);
-    } catch (error: any) {
-      console.error('Failed to load applications:', error);
-      toast({
-        title: "Error Loading Applications",
-        description: "Failed to load your scholarship applications.",
-        variant: "destructive"
+      const signer = await signerPromise;
+      if (!signer) {
+        throw new Error("Signer not available.");
+      }
+      const contract = new Contract(CONTRACT_ADDRESS, contractABI.abi, signer);
+
+      const profilePromises = profileIds.map(async (profileId: bigint) => {
+        try {
+          const profileData = await contract.getScholarEncryptedData(profileId);
+          return {
+            profileId: profileId.toString(),
+            academicScore: profileData.academicScore,
+            verificationLevel: profileData.verificationLevel,
+            reputationScore: profileData.reputationScore,
+            isVerified: profileData.isVerified,
+            isActive: profileData.isActive,
+            name: profileData.name,
+            institution: profileData.institution,
+            specialization: profileData.specialization,
+            scholar: profileData.scholar,
+            createdAt: new Date(Number(profileData.createdAt) * 1000).toLocaleString(),
+            lastUpdated: new Date(Number(profileData.lastUpdated) * 1000).toLocaleString(),
+          };
+        } catch (e) {
+          console.warn(`Could not fetch profile ${profileId}:`, e);
+          return null;
+        }
       });
+
+      const profiles = (await Promise.all(profilePromises)).filter(Boolean) as ScholarProfile[];
+      setProfiles(profiles);
+
+    } catch (err: any) {
+      console.error("Failed to fetch applications:", err);
+      setErrorApplications(`Failed to load applications: ${err.message}`);
     } finally {
-      setIsLoading(false);
+      setIsLoadingApplications(false);
     }
   };
 
-  const decryptProfileData = async (profileId: string) => {
+  const decryptProfileData = async (profile: ScholarProfile) => {
     if (!instance || !address || !signerPromise || !isInitialized) {
       toast({
-        title: "Decryption Service Not Ready",
-        description: "Please wait for the decryption service to initialize.",
+        title: "Encryption Service Not Ready",
+        description: "Please wait for the encryption service to initialize.",
         variant: "destructive"
       });
       return;
     }
 
-    setIsDecrypting(prev => ({ ...prev, [profileId]: true }));
-
+    setIsDecrypting(prev => ({ ...prev, [profile.profileId]: true }));
     try {
-      const profile = profiles.find(p => p.profileId === profileId);
-      if (!profile) return;
-
-      console.log('Starting decryption for profile:', profileId);
-
-      // Create decryption request
       const signer = await signerPromise;
-      
-      // Convert hex strings to proper format for decryption
-      const academicScoreBytes = profile.academicScore.startsWith('0x') 
-        ? profile.academicScore.slice(2) 
-        : profile.academicScore;
-      
-      const verificationLevelBytes = profile.verificationLevel.startsWith('0x') 
-        ? profile.verificationLevel.slice(2) 
-        : profile.verificationLevel;
-      
-      const reputationScoreBytes = profile.reputationScore.startsWith('0x') 
-        ? profile.reputationScore.slice(2) 
-        : profile.reputationScore;
+      if (!signer) {
+        throw new Error("Signer not available for decryption.");
+      }
 
-      // Decrypt the data using FHE instance
+      // Decrypt academicScore
       const decryptedAcademicScore = await instance.userDecrypt(
         CONTRACT_ADDRESS,
         address,
-        `0x${academicScoreBytes}`
+        profile.academicScore
       );
 
+      // Decrypt verificationLevel
       const decryptedVerificationLevel = await instance.userDecrypt(
         CONTRACT_ADDRESS,
         address,
-        `0x${verificationLevelBytes}`
+        profile.verificationLevel
       );
 
+      // Decrypt reputationScore
       const decryptedReputationScore = await instance.userDecrypt(
         CONTRACT_ADDRESS,
         address,
-        `0x${reputationScoreBytes}`
+        profile.reputationScore
       );
 
-      console.log('Decryption results:', {
-        academicScore: decryptedAcademicScore,
-        verificationLevel: decryptedVerificationLevel,
-        reputationScore: decryptedReputationScore
-      });
-
-      // Store decrypted data
       setDecryptedData(prev => ({
         ...prev,
-        [profileId]: {
+        [profile.profileId]: {
           academicScore: Number(decryptedAcademicScore),
           verificationLevel: Number(decryptedVerificationLevel),
-          reputationScore: Number(decryptedReputationScore)
+          reputationScore: Number(decryptedReputationScore),
         }
       }));
 
       toast({
-        title: "Data Decrypted Successfully",
-        description: "Your encrypted application data has been decrypted and is now visible.",
+        title: "Decryption Successful",
+        description: `Sensitive data for application ${profile.profileId} has been decrypted.`,
       });
 
-    } catch (error: any) {
-      console.error('Decryption failed:', error);
+    } catch (err: any) {
+      console.error("Decryption failed:", err);
       toast({
         title: "Decryption Failed",
-        description: `Failed to decrypt data: ${error.message}`,
+        description: `Failed to decrypt data for application ${profile.profileId}: ${err.message}`,
         variant: "destructive"
       });
     } finally {
-      setIsDecrypting(prev => ({ ...prev, [profileId]: false }));
+      setIsDecrypting(prev => ({ ...prev, [profile.profileId]: false }));
     }
   };
 
-  const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleDateString('en-US', {
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit'
-    });
-  };
-
-  const getGPAFromScore = (score: number) => {
-    switch (score) {
-      case 4: return "3.8 - 4.0";
-      case 3: return "3.5 - 3.7";
-      case 2: return "3.2 - 3.4";
-      case 1: return "3.0 - 3.1";
-      default: return "Unknown";
-    }
+  const getGpaRange = (score: number | undefined) => {
+    if (score === undefined) return 'N/A';
+    if (score === 4) return '3.8 - 4.0';
+    if (score === 3) return '3.5 - 3.7';
+    if (score === 2) return '3.2 - 3.4';
+    if (score === 1) return '3.0 - 3.1';
+    return 'Unknown';
   };
 
   if (!isConnected) {
     return (
-      <section className="py-16 bg-secondary/30">
+      <section id="my-applications" className="py-16 bg-secondary/30">
         <div className="container mx-auto px-6">
-          <div className="max-w-4xl mx-auto text-center">
-            <div className="p-8 bg-muted rounded-lg">
-              <Shield className="w-16 h-16 mx-auto mb-4 text-muted-foreground" />
-              <h2 className="text-2xl font-bold mb-4">Connect Your Wallet</h2>
-              <p className="text-muted-foreground">
-                Please connect your wallet to view your scholarship applications.
-              </p>
-            </div>
+          <div className="max-w-6xl mx-auto">
+            <Card className="border-academic-gold/20 shadow-academic">
+              <CardHeader className="bg-gradient-to-r from-envelope-sealed to-envelope-open border-b">
+                <CardTitle className="flex items-center gap-3 text-academic-primary">
+                  <div className="p-2 rounded-lg bg-academic-primary text-white">
+                    <User className="w-5 h-5" />
+                  </div>
+                  My Applications
+                </CardTitle>
+                <CardDescription>
+                  Connect your wallet to view your submitted scholarship applications.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="p-8 text-center">
+                <p className="text-muted-foreground">Please connect your wallet to view your applications.</p>
+              </CardContent>
+            </Card>
+          </div>
+        </div>
+      </section>
+    );
+  }
+
+  if (fheLoading || isLoadingApplications || isLoadingProfileIds) {
+    return (
+      <section id="my-applications" className="py-16 bg-secondary/30">
+        <div className="container mx-auto px-6">
+          <div className="max-w-6xl mx-auto">
+            <Card className="border-academic-gold/20 shadow-academic">
+              <CardHeader className="bg-gradient-to-r from-envelope-sealed to-envelope-open border-b">
+                <CardTitle className="flex items-center gap-3 text-academic-primary">
+                  <div className="p-2 rounded-lg bg-academic-primary text-white">
+                    <User className="w-5 h-5" />
+                  </div>
+                  My Applications
+                </CardTitle>
+                <CardDescription>
+                  Loading your submitted scholarship applications...
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="p-8 text-center">
+                <Loader2 className="h-8 w-8 animate-spin text-academic-primary mx-auto" />
+                <p className="text-muted-foreground mt-4">Loading applications and encryption service...</p>
+              </CardContent>
+            </Card>
+          </div>
+        </div>
+      </section>
+    );
+  }
+
+  if (fheError || errorApplications || profileIdsError) {
+    return (
+      <section id="my-applications" className="py-16 bg-secondary/30">
+        <div className="container mx-auto px-6">
+          <div className="max-w-6xl mx-auto">
+            <Card className="border-academic-gold/20 shadow-academic">
+              <CardHeader className="bg-gradient-to-r from-envelope-sealed to-envelope-open border-b">
+                <CardTitle className="flex items-center gap-3 text-academic-primary">
+                  <div className="p-2 rounded-lg bg-academic-primary text-white">
+                    <User className="w-5 h-5" />
+                  </div>
+                  My Applications
+                </CardTitle>
+                <CardDescription>
+                  Error loading your submitted scholarship applications.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="p-8 text-center">
+                <p className="text-red-500">Error: {fheError?.message || errorApplications || profileIdsError?.message}</p>
+                <Button onClick={loadUserApplications} className="mt-4">Retry</Button>
+              </CardContent>
+            </Card>
+          </div>
+        </div>
+      </section>
+    );
+  }
+
+  if (profiles.length === 0) {
+    return (
+      <section id="my-applications" className="py-16 bg-secondary/30">
+        <div className="container mx-auto px-6">
+          <div className="max-w-6xl mx-auto">
+            <Card className="border-academic-gold/20 shadow-academic">
+              <CardHeader className="bg-gradient-to-r from-envelope-sealed to-envelope-open border-b">
+                <CardTitle className="flex items-center gap-3 text-academic-primary">
+                  <div className="p-2 rounded-lg bg-academic-primary text-white">
+                    <User className="w-5 h-5" />
+                  </div>
+                  My Applications
+                </CardTitle>
+                <CardDescription>
+                  You have not submitted any scholarship applications yet.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="p-8 text-center">
+                <p className="text-muted-foreground">Start by submitting a new application!</p>
+              </CardContent>
+            </Card>
           </div>
         </div>
       </section>
@@ -234,248 +319,151 @@ export const MyApplication = () => {
               My Applications
             </h2>
             <p className="text-lg text-muted-foreground max-w-2xl mx-auto">
-              View and manage your scholarship applications. Decrypt sensitive data to see your encrypted academic information.
+              View and decrypt your submitted scholarship applications.
             </p>
+            {profileCount && (
+              <p className="text-sm text-muted-foreground mt-2">
+                Total profiles in contract: {profileCount.toString()}
+              </p>
+            )}
           </div>
 
-          {isLoading ? (
-            <div className="text-center py-8">
-              <RefreshCw className="w-8 h-8 mx-auto mb-4 animate-spin text-academic-primary" />
-              <p className="text-muted-foreground">Loading your applications...</p>
-            </div>
-          ) : profiles.length === 0 ? (
-            <Card className="border-academic-gold/20 shadow-academic">
-              <CardContent className="p-8 text-center">
-                <FileText className="w-16 h-16 mx-auto mb-4 text-muted-foreground" />
-                <h3 className="text-xl font-semibold mb-2">No Applications Found</h3>
-                <p className="text-muted-foreground mb-4">
-                  You haven't submitted any scholarship applications yet.
-                </p>
-                <Button 
-                  onClick={() => window.location.href = '/#application-form'}
-                  className="bg-academic-primary hover:bg-academic-seal"
-                >
-                  Submit Application
-                </Button>
-              </CardContent>
-            </Card>
-          ) : (
-            <div className="space-y-6">
-              {profiles.map((profile) => (
-                <Card key={profile.profileId} className="border-academic-gold/20 shadow-academic">
-                  <CardHeader className="bg-gradient-to-r from-envelope-sealed to-envelope-open border-b">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <CardTitle className="flex items-center gap-3 text-academic-primary">
-                          <div className="p-2 rounded-lg bg-academic-primary text-white">
-                            <GraduationCap className="w-5 h-5" />
-                          </div>
-                          {profile.name}
-                        </CardTitle>
-                        <CardDescription className="mt-2">
-                          {profile.institution} • {profile.specialization}
-                        </CardDescription>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <Badge variant={profile.isVerified ? "default" : "secondary"}>
-                          {profile.isVerified ? "Verified" : "Pending"}
-                        </Badge>
-                        <Badge variant={profile.isActive ? "default" : "destructive"}>
-                          {profile.isActive ? "Active" : "Inactive"}
-                        </Badge>
-                      </div>
+          <div className="space-y-8">
+            {profiles.map(profile => (
+              <Card key={profile.profileId} className="border-academic-gold/20 shadow-academic">
+                <CardHeader className="bg-gradient-to-r from-envelope-sealed to-envelope-open border-b flex flex-row items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 rounded-lg bg-academic-primary text-white">
+                      <GraduationCap className="w-5 h-5" />
                     </div>
-                  </CardHeader>
-                  
-                  <CardContent className="p-6">
-                    <div className="grid md:grid-cols-2 gap-6">
-                      {/* Public Information */}
-                      <div className="space-y-4">
-                        <h4 className="font-semibold text-academic-primary flex items-center gap-2">
-                          <FileText className="w-4 h-4" />
-                          Public Information
-                        </h4>
-                        <div className="space-y-2 text-sm">
-                          <div className="flex justify-between">
-                            <span className="text-muted-foreground">Name:</span>
-                            <span className="font-medium">{profile.name}</span>
-                          </div>
-                          <div className="flex justify-between">
-                            <span className="text-muted-foreground">Institution:</span>
-                            <span className="font-medium">{profile.institution}</span>
-                          </div>
-                          <div className="flex justify-between">
-                            <span className="text-muted-foreground">Specialization:</span>
-                            <span className="font-medium">{profile.specialization}</span>
-                          </div>
-                          <div className="flex justify-between">
-                            <span className="text-muted-foreground">Status:</span>
-                            <Badge variant={profile.isVerified ? "default" : "secondary"} className="text-xs">
-                              {profile.isVerified ? "Verified" : "Pending Review"}
-                            </Badge>
-                          </div>
-                        </div>
-                      </div>
+                    <CardTitle className="text-academic-primary">
+                      Application #{profile.profileId} - {profile.name}
+                    </CardTitle>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Badge variant={profile.isVerified ? "default" : "secondary"}>
+                      {profile.isVerified ? "Verified" : "Pending Verification"}
+                    </Badge>
+                    <Badge variant={profile.isActive ? "default" : "destructive"}>
+                      {profile.isActive ? "Active" : "Inactive"}
+                    </Badge>
+                  </div>
+                </CardHeader>
+                <CardContent className="p-8 space-y-6">
+                  <div className="grid md:grid-cols-2 gap-6">
+                    <div className="space-y-2">
+                      <p className="text-sm font-medium text-muted-foreground">Full Name</p>
+                      <p className="text-academic-primary font-semibold">{profile.name}</p>
+                    </div>
+                    <div className="space-y-2">
+                      <p className="text-sm font-medium text-muted-foreground">University</p>
+                      <p className="text-academic-primary font-semibold">{profile.institution}</p>
+                    </div>
+                    <div className="space-y-2">
+                      <p className="text-sm font-medium text-muted-foreground">Specialization</p>
+                      <p className="text-academic-primary font-semibold">{profile.specialization}</p>
+                    </div>
+                    <div className="space-y-2">
+                      <p className="text-sm font-medium text-muted-foreground">Submitted On</p>
+                      <p className="text-academic-primary font-semibold">{profile.createdAt}</p>
+                    </div>
+                  </div>
 
-                      {/* Encrypted Information */}
-                      <div className="space-y-4">
-                        <h4 className="font-semibold text-academic-primary flex items-center gap-2">
-                          <Lock className="w-4 h-4" />
-                          Encrypted Information
-                        </h4>
-                        
-                        {decryptedData[profile.profileId] ? (
-                          <div className="space-y-2 text-sm">
-                            <div className="flex justify-between">
-                              <span className="text-muted-foreground">GPA Range:</span>
-                              <span className="font-medium text-green-600">
-                                {getGPAFromScore(decryptedData[profile.profileId].academicScore)}
-                              </span>
-                            </div>
-                            <div className="flex justify-between">
-                              <span className="text-muted-foreground">Verification Level:</span>
-                              <span className="font-medium">{decryptedData[profile.profileId].verificationLevel}</span>
-                            </div>
-                            <div className="flex justify-between">
-                              <span className="text-muted-foreground">Reputation Score:</span>
-                              <span className="font-medium">{decryptedData[profile.profileId].reputationScore}</span>
-                            </div>
-                            <div className="mt-3 p-2 bg-green-50 border border-green-200 rounded text-green-800 text-xs">
-                              <div className="flex items-center gap-1">
-                                <Unlock className="w-3 h-3" />
-                                Data decrypted and visible
-                              </div>
-                            </div>
-                          </div>
+                  <div className="space-y-4">
+                    <h3 className="text-lg font-semibold text-academic-primary flex items-center gap-2">
+                      <Lock className="w-5 h-5" /> Encrypted Data
+                    </h3>
+                    <div className="grid md:grid-cols-3 gap-4">
+                      <div className="space-y-2">
+                        <p className="text-sm font-medium text-muted-foreground">Academic Score (GPA)</p>
+                        {decryptedData[profile.profileId]?.academicScore !== undefined ? (
+                          <p className="text-green-600 font-semibold flex items-center gap-1">
+                            <Unlock className="w-4 h-4" /> {getGpaRange(decryptedData[profile.profileId]?.academicScore)}
+                          </p>
                         ) : (
-                          <div className="space-y-3">
-                            <div className="p-3 bg-muted rounded-lg">
-                              <div className="flex items-center gap-2 text-muted-foreground text-sm mb-2">
-                                <Lock className="w-4 h-4" />
-                                Sensitive data encrypted
-                              </div>
-                              <div className="space-y-1 text-xs">
-                                <div className="flex justify-between">
-                                  <span>GPA Range:</span>
-                                  <span className="font-mono">••••••</span>
-                                </div>
-                                <div className="flex justify-between">
-                                  <span>Verification Level:</span>
-                                  <span className="font-mono">••••••</span>
-                                </div>
-                                <div className="flex justify-between">
-                                  <span>Reputation Score:</span>
-                                  <span className="font-mono">••••••</span>
-                                </div>
-                              </div>
-                            </div>
-                            
-                            <Button
-                              onClick={() => decryptProfileData(profile.profileId)}
-                              disabled={isDecrypting[profile.profileId] || !isInitialized}
-                              size="sm"
-                              className="w-full bg-academic-primary hover:bg-academic-seal"
-                            >
-                              {isDecrypting[profile.profileId] ? (
-                                <>
-                                  <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
-                                  Decrypting...
-                                </>
-                              ) : (
-                                <>
-                                  <Eye className="w-4 h-4 mr-2" />
-                                  Decrypt Data
-                                </>
-                              )}
-                            </Button>
-                          </div>
+                          <p className="text-muted-foreground flex items-center gap-1">
+                            <Lock className="w-4 h-4" /> ••••••
+                          </p>
                         )}
                       </div>
-                    </div>
-
-                    <Separator className="my-4" />
-
-                    {/* Application Details */}
-                    <div className="grid md:grid-cols-3 gap-4 text-sm">
-                      <div className="flex items-center gap-2">
-                        <Calendar className="w-4 h-4 text-muted-foreground" />
-                        <div>
-                          <div className="text-muted-foreground">Submitted</div>
-                          <div className="font-medium">{formatDate(profile.createdAt)}</div>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <Calendar className="w-4 h-4 text-muted-foreground" />
-                        <div>
-                          <div className="text-muted-foreground">Last Updated</div>
-                          <div className="font-medium">{formatDate(profile.lastUpdated)}</div>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <Shield className="w-4 h-4 text-muted-foreground" />
-                        <div>
-                          <div className="text-muted-foreground">Profile ID</div>
-                          <div className="font-mono text-xs">{profile.profileId}</div>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Action Buttons */}
-                    <div className="flex gap-2 mt-4">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => window.open(`https://sepolia.etherscan.io/address/${CONTRACT_ADDRESS}`, '_blank')}
-                      >
-                        <ExternalLink className="w-4 h-4 mr-2" />
-                        View on Etherscan
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => setExpandedProfile(
-                          expandedProfile === profile.profileId ? null : profile.profileId
-                        )}
-                      >
-                        {expandedProfile === profile.profileId ? (
-                          <>
-                            <EyeOff className="w-4 h-4 mr-2" />
-                            Hide Details
-                          </>
+                      <div className="space-y-2">
+                        <p className="text-sm font-medium text-muted-foreground">Verification Level</p>
+                        {decryptedData[profile.profileId]?.verificationLevel !== undefined ? (
+                          <p className="text-green-600 font-semibold flex items-center gap-1">
+                            <Unlock className="w-4 h-4" /> {decryptedData[profile.profileId]?.verificationLevel}
+                          </p>
                         ) : (
-                          <>
-                            <Eye className="w-4 h-4 mr-2" />
-                            Show Details
-                          </>
+                          <p className="text-muted-foreground flex items-center gap-1">
+                            <Lock className="w-4 h-4" /> ••••••
+                          </p>
                         )}
-                      </Button>
-                    </div>
-
-                    {/* Expanded Details */}
-                    {expandedProfile === profile.profileId && (
-                      <div className="mt-4 p-4 bg-muted rounded-lg">
-                        <h5 className="font-semibold mb-2">Technical Details</h5>
-                        <div className="space-y-2 text-xs font-mono">
-                          <div>
-                            <span className="text-muted-foreground">Academic Score Hash:</span>
-                            <div className="break-all">{profile.academicScore}</div>
-                          </div>
-                          <div>
-                            <span className="text-muted-foreground">Verification Level Hash:</span>
-                            <div className="break-all">{profile.verificationLevel}</div>
-                          </div>
-                          <div>
-                            <span className="text-muted-foreground">Reputation Score Hash:</span>
-                            <div className="break-all">{profile.reputationScore}</div>
-                          </div>
-                        </div>
                       </div>
-                    )}
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
-          )}
+                      <div className="space-y-2">
+                        <p className="text-sm font-medium text-muted-foreground">Reputation Score</p>
+                        {decryptedData[profile.profileId]?.reputationScore !== undefined ? (
+                          <p className="text-green-600 font-semibold flex items-center gap-1">
+                            <Unlock className="w-4 h-4" /> {decryptedData[profile.profileId]?.reputationScore}
+                          </p>
+                        ) : (
+                          <p className="text-muted-foreground flex items-center gap-1">
+                            <Lock className="w-4 h-4" /> ••••••
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                    <Button
+                      onClick={() => decryptProfileData(profile)}
+                      disabled={isDecrypting[profile.profileId] || !isInitialized || fheLoading}
+                      className="bg-academic-primary hover:bg-academic-seal text-white"
+                    >
+                      {isDecrypting[profile.profileId] ? (
+                        <>
+                          <Loader2 className="w-4 h-4 mr-2 animate-spin" /> Decrypting...
+                        </>
+                      ) : (
+                        <>
+                          <Unlock className="w-4 h-4 mr-2" /> Decrypt Data
+                        </>
+                      )}
+                    </Button>
+                  </div>
+
+                  <Accordion type="single" collapsible className="w-full">
+                    <AccordionItem value="technical-details">
+                      <AccordionTrigger className="text-academic-primary hover:no-underline">
+                        Technical Details
+                      </AccordionTrigger>
+                      <AccordionContent className="space-y-4 pt-4">
+                        <div className="space-y-2">
+                          <p className="text-sm font-medium text-muted-foreground">Encrypted Academic Score Hash</p>
+                          <p className="font-mono text-xs break-all bg-muted p-2 rounded">{profile.academicScore}</p>
+                        </div>
+                        <div className="space-y-2">
+                          <p className="text-sm font-medium text-muted-foreground">Encrypted Verification Level Hash</p>
+                          <p className="font-mono text-xs break-all bg-muted p-2 rounded">{profile.verificationLevel}</p>
+                        </div>
+                        <div className="space-y-2">
+                          <p className="text-sm font-medium text-muted-foreground">Encrypted Reputation Score Hash</p>
+                          <p className="font-mono text-xs break-all bg-muted p-2 rounded">{profile.reputationScore}</p>
+                        </div>
+                        <div className="space-y-2">
+                          <p className="text-sm font-medium text-muted-foreground">View on Etherscan</p>
+                          <a
+                            href={`https://sepolia.etherscan.io/address/${CONTRACT_ADDRESS}#readContract`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-blue-500 hover:underline flex items-center gap-1"
+                          >
+                            Contract on Etherscan <ExternalLink className="w-4 h-4" />
+                          </a>
+                        </div>
+                      </AccordionContent>
+                    </AccordionItem>
+                  </Accordion>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
         </div>
       </div>
     </section>

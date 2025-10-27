@@ -37,7 +37,7 @@ export const ApplicationForm = () => {
   });
 
   // Contract address - deployed to Sepolia testnet
-  const CONTRACT_ADDRESS = import.meta.env.VITE_CONTRACT_ADDRESS || '0x7AC73d56fF5be33C2122E10a738072DB7c9FB34c';
+  const CONTRACT_ADDRESS = import.meta.env.VITE_CONTRACT_ADDRESS || '0x4a1390b602B658f5800530A54f3e3d8c67D3bc1F';
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;

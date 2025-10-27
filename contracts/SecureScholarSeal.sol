@@ -476,4 +476,28 @@ contract SecureScholarSeal is SepoliaConfig {
             record.graduationDate
         );
     }
+    
+    function getProfileCount() public view returns (uint256) {
+        return profileCounter;
+    }
+    
+    function getProfileIdsByScholar(address scholar) public view returns (uint256[] memory) {
+        uint256[] memory profileIds = new uint256[](profileCounter);
+        uint256 count = 0;
+        
+        for (uint256 i = 0; i < profileCounter; i++) {
+            if (scholarProfiles[i].scholar == scholar) {
+                profileIds[count] = i;
+                count++;
+            }
+        }
+        
+        // Resize array to actual count
+        uint256[] memory result = new uint256[](count);
+        for (uint256 i = 0; i < count; i++) {
+            result[i] = profileIds[i];
+        }
+        
+        return result;
+    }
 }
