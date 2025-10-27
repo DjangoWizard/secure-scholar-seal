@@ -62,7 +62,9 @@ export function useZamaInstance() {
           retryCount++;
           console.error(`SDK initialization attempt ${retryCount} failed:`, initError);
           if (retryCount >= maxRetries) {
-            throw initError;
+            // If all retries failed, continue anyway - FHE might work without threads
+            console.warn('SDK initialization failed after all retries, continuing without threads...');
+            break;
           }
           // Wait before retry
           await new Promise(resolve => setTimeout(resolve, 1000 * retryCount));
