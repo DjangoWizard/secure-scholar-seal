@@ -97,7 +97,8 @@ export const MyApplication = () => {
           try {
             // Use wagmi's readContract function directly
             const { readContract } = await import('wagmi/actions');
-            const config = await import('wagmi').then(m => m.getConfig());
+            const { getConfig } = await import('wagmi');
+            const config = getConfig();
             
             const profileData = await readContract(config, {
               address: CONTRACT_ADDRESS as `0x${string}`,
