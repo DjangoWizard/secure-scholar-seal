@@ -7,11 +7,12 @@ import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Upload, Lock, FileText, GraduationCap } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
-import { useAccount } from 'wagmi';
+import { useAccount, useWriteContract, useWaitForTransactionReceipt } from 'wagmi';
 import { useZamaInstance } from '@/hooks/useZamaInstance';
 import { useEthersSigner } from '@/hooks/useEthersSigner';
 import { convertHex, getContactInfoValue, getDescriptionValue } from '@/lib/fheUtils';
 import { useFileUpload } from '@/lib/pinata';
+import contractABI from '@/lib/contractABI.json';
 
 export const ApplicationForm = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -30,6 +31,10 @@ export const ApplicationForm = () => {
   const { instance, isLoading: fheLoading, error: fheError, isInitialized } = useZamaInstance();
   const signerPromise = useEthersSigner();
   const { uploadFile, uploadJSON, isUploading, uploadError } = useFileUpload();
+  const { writeContract, data: hash, isPending, error } = useWriteContract();
+  const { isLoading: isConfirming, isSuccess: isConfirmed } = useWaitForTransactionReceipt({
+    hash,
+  });
 
   // Contract address - you can set this as an environment variable
   const CONTRACT_ADDRESS = import.meta.env.VITE_CONTRACT_ADDRESS || '0x0000000000000000000000000000000000000000';
@@ -51,6 +56,17 @@ export const ApplicationForm = () => {
   const removeFile = (index: number) => {
     setSelectedFiles(prev => prev.filter((_, i) => i !== index));
   };
+
+  // Handle transaction confirmation
+  React.useEffect(() => {
+    if (isConfirmed && hash) {
+      toast({
+        title: "Transaction Confirmed!",
+        description: `Your scholarship application has been successfully submitted to the blockchain! Transaction: ${hash}`,
+      });
+      setIsSubmitting(false);
+    }
+  }, [isConfirmed, hash, toast]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -143,23 +159,32 @@ export const ApplicationForm = () => {
       
       console.log('Encryption completed, handles:', handles);
       
-      // Here you would call the smart contract
-      // const signer = await signerPromise;
-      // const contract = new Contract(CONTRACT_ADDRESS, CONTRACT_ABI, signer);
-      // const tx = await contract.createScholarProfile(
-      //   formData.fullName,
-      //   formData.university,
-      //   formData.essay,
-      //   handles[0],
-      //   handles[1], 
-      //   handles[2],
-      //   proof
-      // );
-      // await tx.wait();
+      // Call the smart contract using wagmi
+      console.log('Calling smart contract...');
+      
+      if (!CONTRACT_ADDRESS || CONTRACT_ADDRESS === '0x0000000000000000000000000000000000000000') {
+        throw new Error('Contract address not configured. Please set VITE_CONTRACT_ADDRESS in your environment.');
+      }
+      
+      console.log('Contract instance created, calling createScholarProfile...');
+      writeContract({
+        address: CONTRACT_ADDRESS as `0x${string}`,
+        abi: contractABI.abi,
+        functionName: 'createScholarProfile',
+        args: [
+          formData.fullName,
+          formData.university,
+          formData.essay, // specialization
+          handles[0], // academicScore
+          proof
+        ],
+      });
+      
+      console.log('Transaction submitted, waiting for confirmation...');
       
       toast({
-        title: "Application Sealed & Submitted",
-        description: `Your scholarship application has been encrypted and submitted. ${ipfsHash ? `Files uploaded to IPFS: ${ipfsHash}` : ''}`,
+        title: "Transaction Submitted",
+        description: `Your scholarship application has been encrypted and submitted to the blockchain! ${ipfsHash ? `Files uploaded to IPFS: ${ipfsHash}` : ''}`,
       });
       
     } catch (error: any) {
@@ -303,7 +328,12 @@ export const ApplicationForm = () => {
                       id="file-upload"
                     />
                     <Label htmlFor="file-upload">
-                      <Button variant="outline" type="button" className="border-academic-gold text-academic-primary cursor-pointer">
+                      <Button 
+                        variant="outline" 
+                        type="button" 
+                        className="border-academic-gold text-academic-primary cursor-pointer"
+                        onClick={() => document.getElementById('file-upload')?.click()}
+                      >
                         Choose Files
                       </Button>
                     </Label>
@@ -380,7 +410,7 @@ export const ApplicationForm = () => {
                 <Button 
                   type="submit" 
                   size="lg"
-                  disabled={isSubmitting || fheLoading || !isConnected || !isInitialized || isUploading}
+                  disabled={isSubmitting || fheLoading || !isConnected || !isInitialized || isUploading || isPending || isConfirming}
                   className="w-full bg-academic-primary hover:bg-academic-seal text-white py-4 text-lg"
                 >
                   {isSubmitting ? (
@@ -392,6 +422,16 @@ export const ApplicationForm = () => {
                     <>
                       <Upload className="w-5 h-5 mr-2 animate-spin" />
                       Uploading Files...
+                    </>
+                  ) : isPending ? (
+                    <>
+                      <Lock className="w-5 h-5 mr-2 animate-spin" />
+                      Signing Transaction...
+                    </>
+                  ) : isConfirming ? (
+                    <>
+                      <Lock className="w-5 h-5 mr-2 animate-spin" />
+                      Confirming Transaction...
                     </>
                   ) : !isConnected ? (
                     <>
