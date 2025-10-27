@@ -36,8 +36,8 @@ export const ApplicationForm = () => {
     hash,
   });
 
-  // Contract address - you can set this as an environment variable
-  const CONTRACT_ADDRESS = import.meta.env.VITE_CONTRACT_ADDRESS || '0x0000000000000000000000000000000000000000';
+  // Contract address - deployed to Sepolia testnet
+  const CONTRACT_ADDRESS = import.meta.env.VITE_CONTRACT_ADDRESS || '0x7AC73d56fF5be33C2122E10a738072DB7c9FB34c';
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
