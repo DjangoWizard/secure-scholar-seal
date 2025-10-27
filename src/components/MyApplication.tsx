@@ -93,15 +93,10 @@ export const MyApplication = () => {
       setHasProfileErrors(false);
       
       try {
-        // Use ethers Contract directly like in aidwell-connect
-        const { Contract } = await import('ethers');
-        const signer = await signerPromise;
-        
-        if (!signer) {
-          throw new Error('No signer available');
-        }
-
-        const contract = new Contract(CONTRACT_ADDRESS, contractABI.abi, signer);
+        // Use a read-only provider for contract calls to avoid signer runner limitations
+        const { Contract, BrowserProvider } = await import('ethers');
+        const provider = new BrowserProvider((window as any).ethereum);
+        const contract = new Contract(CONTRACT_ADDRESS, contractABI.abi, provider);
         
         const profilePromises = profileIds.map(async (profileId: bigint) => {
           try {
@@ -159,37 +154,56 @@ export const MyApplication = () => {
     setIsDecrypting(prev => ({ ...prev, [profile.profileId]: true }));
     try {
       const signer = await signerPromise;
-      if (!signer) {
-        throw new Error("Signer not available for decryption.");
-      }
+      if (!signer) throw new Error("Signer not available for decryption.");
 
-      // Decrypt academicScore
-      const decryptedAcademicScore = await instance.userDecrypt(
-        CONTRACT_ADDRESS,
-        address,
-        profile.academicScore
+      // Build handle-contract pairs for all fields
+      const handleContractPairs = [
+        { handle: profile.academicScore, contractAddress: CONTRACT_ADDRESS },
+        { handle: profile.verificationLevel, contractAddress: CONTRACT_ADDRESS },
+        { handle: profile.reputationScore, contractAddress: CONTRACT_ADDRESS },
+      ];
+
+      // Create EIP712 typed data signature
+      const startTimeStamp = Math.floor(Date.now() / 1000).toString();
+      const durationDays = '10';
+      const contractAddresses = [CONTRACT_ADDRESS];
+
+      const keypair = instance.generateKeypair();
+      const eip712 = instance.createEIP712(
+        keypair.publicKey,
+        contractAddresses,
+        startTimeStamp,
+        durationDays
       );
 
-      // Decrypt verificationLevel
-      const decryptedVerificationLevel = await instance.userDecrypt(
-        CONTRACT_ADDRESS,
-        address,
-        profile.verificationLevel
+      const signature = await signer.signTypedData(
+        eip712.domain,
+        { UserDecryptRequestVerification: eip712.types.UserDecryptRequestVerification },
+        eip712.message
       );
 
-      // Decrypt reputationScore
-      const decryptedReputationScore = await instance.userDecrypt(
-        CONTRACT_ADDRESS,
+      // Perform user decryption
+      const result = await instance.userDecrypt(
+        handleContractPairs,
+        keypair.privateKey,
+        keypair.publicKey,
+        signature.replace('0x', ''),
+        contractAddresses,
         address,
-        profile.reputationScore
+        startTimeStamp,
+        durationDays
       );
+
+      const decryptedAcademicScore = result[profile.academicScore];
+      const decryptedVerificationLevel = result[profile.verificationLevel];
+      const decryptedReputationScore = result[profile.reputationScore];
 
       setDecryptedData(prev => ({
         ...prev,
         [profile.profileId]: {
-          academicScore: Number(decryptedAcademicScore),
-          verificationLevel: Number(decryptedVerificationLevel),
-          reputationScore: Number(decryptedReputationScore),
+          academicScore: Number(decryptedAcademicScore ?? 0),
+          verificationLevel: Number(decryptedVerificationLevel ?? 0),
+          reputationScore: Number(decryptedReputationScore ?? 0),
         }
       }));
 

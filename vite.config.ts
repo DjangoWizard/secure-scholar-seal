@@ -7,11 +7,16 @@ export default defineConfig({
   server: {
     host: "::",
     port: 8080,
-    headers: {
-      'Cross-Origin-Opener-Policy': 'unsafe-none',
-      'Cross-Origin-Embedder-Policy': 'unsafe-none',
-      'Cross-Origin-Resource-Policy': 'cross-origin'
-    }
+    headers: (() => {
+      // Allow switching headers via env for FHE threads vs wallet SDKs
+      const coop = process.env.VITE_COOP_HEADER || 'unsafe-none';
+      const coep = process.env.VITE_COEP_HEADER || 'unsafe-none';
+      return {
+        'Cross-Origin-Opener-Policy': coop,
+        'Cross-Origin-Embedder-Policy': coep,
+        'Cross-Origin-Resource-Policy': 'cross-origin'
+      } as Record<string, string>;
+    })()
   },
   plugins: [react()],
   define: { 
