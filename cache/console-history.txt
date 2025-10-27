@@ -1,0 +1,6 @@
+pwd
+git add .
+cd /Users/nithon/Desktop/Zama/secure-scholar-seal && npx hardhat run scripts/deploy.cjs --network sepolia
+npx hardhat run scripts/deploy.cjs --network sepolia
+exit
+npx hardhat run scripts/deploy.cjs --network sepolia

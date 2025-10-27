@@ -2,7 +2,7 @@
 pragma solidity ^0.8.24;
 
 import { SepoliaConfig } from "@fhevm/solidity/config/ZamaConfig.sol";
-import { euint32, externalEuint32, euint8, ebool, FHE } from "@fhevm/solidity/lib/FHE.sol";
+import { euint32, externalEuint32, euint8, ebool, eaddress, externalEaddress, FHE } from "@fhevm/solidity/lib/FHE.sol";
 
 contract SecureScholarSeal is SepoliaConfig {
     using FHE for *;
@@ -108,7 +108,7 @@ contract SecureScholarSeal is SepoliaConfig {
         euint32 internalScore = FHE.fromExternal(academicScore, inputProof);
         
         scholarProfiles[profileId] = ScholarProfile({
-            profileId: FHE.asEuint32(0), // Will be set properly later
+            profileId: FHE.asEuint32(uint32(profileId)),
             academicScore: internalScore,
             verificationLevel: FHE.asEuint32(0),
             reputationScore: FHE.asEuint32(0),
@@ -121,6 +121,14 @@ contract SecureScholarSeal is SepoliaConfig {
             createdAt: block.timestamp,
             lastUpdated: block.timestamp
         });
+        
+        // Set ACL permissions for encrypted data
+        FHE.allowThis(scholarProfiles[profileId].academicScore);
+        FHE.allow(scholarProfiles[profileId].academicScore, msg.sender);
+        FHE.allowThis(scholarProfiles[profileId].verificationLevel);
+        FHE.allow(scholarProfiles[profileId].verificationLevel, msg.sender);
+        FHE.allowThis(scholarProfiles[profileId].reputationScore);
+        FHE.allow(scholarProfiles[profileId].reputationScore, msg.sender);
         
         emit ProfileCreated(profileId, msg.sender, _name);
         return profileId;
@@ -146,7 +154,7 @@ contract SecureScholarSeal is SepoliaConfig {
         euint32 internalValidityPeriod = FHE.fromExternal(validityPeriod, inputProof);
         
         credentials[credentialId] = Credential({
-            credentialId: FHE.asEuint32(0), // Will be set properly later
+            credentialId: FHE.asEuint32(uint32(credentialId)),
             score: internalScore,
             validityPeriod: internalValidityPeriod,
             isRevoked: false,
@@ -158,6 +166,12 @@ contract SecureScholarSeal is SepoliaConfig {
             issuedAt: block.timestamp,
             expiresAt: block.timestamp + 365 days // Default 1 year validity
         });
+        
+        // Set ACL permissions for encrypted credential data
+        FHE.allowThis(credentials[credentialId].score);
+        FHE.allow(credentials[credentialId].score, _owner);
+        FHE.allowThis(credentials[credentialId].validityPeriod);
+        FHE.allow(credentials[credentialId].validityPeriod, _owner);
         
         emit CredentialIssued(credentialId, _owner, _credentialType);
         return credentialId;
@@ -178,7 +192,7 @@ contract SecureScholarSeal is SepoliaConfig {
         euint32 internalScore = FHE.fromExternal(verificationScore, inputProof);
         
         verificationRequests[requestId] = VerificationRequest({
-            requestId: FHE.asEuint32(0), // Will be set properly later
+            requestId: FHE.asEuint32(uint32(requestId)),
             verificationScore: internalScore,
             isApproved: false,
             isProcessed: false,
@@ -211,42 +225,32 @@ contract SecureScholarSeal is SepoliaConfig {
     }
     
     function addAcademicRecord(
-        address _student,
-        string memory _degreeType,
-        string memory _major,
-        string memory _institution,
+        address student,
+        string memory degreeType,
         externalEuint32 gpa,
-        externalEuint32 creditHours,
-        externalEuint32 semesterCount,
-        bool _isGraduated,
         bytes calldata inputProof
     ) public returns (uint256) {
         require(msg.sender == institutionManager, "Only institution manager can add records");
-        require(_student != address(0), "Invalid student address");
-        require(bytes(_degreeType).length > 0, "Degree type cannot be empty");
+        require(student != address(0), "Invalid student address");
         
         uint256 recordId = recordCounter++;
-        
-        // Convert externalEuint32 to euint32 using FHE.fromExternal
         euint32 internalGpa = FHE.fromExternal(gpa, inputProof);
-        euint32 internalCreditHours = FHE.fromExternal(creditHours, inputProof);
-        euint32 internalSemesterCount = FHE.fromExternal(semesterCount, inputProof);
         
         academicRecords[recordId] = AcademicRecord({
-            recordId: FHE.asEuint32(0), // Will be set properly later
+            recordId: FHE.asEuint32(uint32(recordId)),
             gpa: internalGpa,
-            creditHours: internalCreditHours,
-            semesterCount: internalSemesterCount,
-            isGraduated: _isGraduated,
-            degreeType: _degreeType,
-            major: _major,
-            institution: _institution,
-            student: _student,
+            creditHours: FHE.asEuint32(0),
+            semesterCount: FHE.asEuint32(0),
+            isGraduated: false,
+            degreeType: degreeType,
+            major: "",
+            institution: "",
+            student: student,
             enrollmentDate: block.timestamp,
-            graduationDate: _isGraduated ? block.timestamp : 0
+            graduationDate: 0
         });
         
-        emit AcademicRecordAdded(recordId, _student, _institution);
+        emit AcademicRecordAdded(recordId, student, "");
         return recordId;
     }
     
@@ -308,7 +312,7 @@ contract SecureScholarSeal is SepoliaConfig {
         string memory credentialType,
         string memory issuer,
         string memory metadataHash,
-        address owner,
+        address credentialOwner,
         uint256 issuedAt,
         uint256 expiresAt
     ) {
@@ -334,7 +338,7 @@ contract SecureScholarSeal is SepoliaConfig {
         string memory requestType,
         string memory evidenceHash,
         address requester,
-        address verifier,
+        address verifierAddress,
         uint256 submittedAt,
         uint256 processedAt
     ) {
@@ -385,5 +389,91 @@ contract SecureScholarSeal is SepoliaConfig {
     
     function getInstitutionReputation(address institution) public view returns (uint8) {
         return 0; // FHE.decrypt(institutionReputation[institution]) - will be decrypted off-chain
+    }
+    
+    // Function to get encrypted scholar profile data for decryption
+    function getScholarEncryptedData(uint256 profileId) public view returns (
+        bytes32 academicScore,
+        bytes32 verificationLevel,
+        bytes32 reputationScore,
+        string memory name,
+        string memory institution,
+        string memory specialization,
+        address scholar,
+        bool isVerified,
+        bool isActive,
+        uint256 createdAt,
+        uint256 lastUpdated
+    ) {
+        ScholarProfile storage profile = scholarProfiles[profileId];
+        return (
+            FHE.toBytes32(profile.academicScore),
+            FHE.toBytes32(profile.verificationLevel),
+            FHE.toBytes32(profile.reputationScore),
+            profile.name,
+            profile.institution,
+            profile.specialization,
+            profile.scholar,
+            profile.isVerified,
+            profile.isActive,
+            profile.createdAt,
+            profile.lastUpdated
+        );
+    }
+    
+    // Function to get encrypted credential data for decryption
+    function getCredentialEncryptedData(uint256 credentialId) public view returns (
+        bytes32 score,
+        bytes32 validityPeriod,
+        bool isRevoked,
+        bool isVerified,
+        string memory credentialType,
+        string memory issuer,
+        string memory metadataHash,
+        address credentialOwner,
+        uint256 issuedAt,
+        uint256 expiresAt
+    ) {
+        Credential storage credential = credentials[credentialId];
+        return (
+            FHE.toBytes32(credential.score),
+            FHE.toBytes32(credential.validityPeriod),
+            credential.isRevoked,
+            credential.isVerified,
+            credential.credentialType,
+            credential.issuer,
+            credential.metadataHash,
+            credential.owner,
+            credential.issuedAt,
+            credential.expiresAt
+        );
+    }
+    
+    // Function to get encrypted academic record data for decryption
+    function getAcademicRecordEncryptedData(uint256 recordId) public view returns (
+        bytes32 gpa,
+        bytes32 creditHours,
+        bytes32 semesterCount,
+        bool isGraduated,
+        string memory degreeType,
+        string memory major,
+        string memory institution,
+        address student,
+        uint256 enrollmentDate,
+        uint256 graduationDate
+    ) {
+        AcademicRecord storage record = academicRecords[recordId];
+        return (
+            FHE.toBytes32(record.gpa),
+            FHE.toBytes32(record.creditHours),
+            FHE.toBytes32(record.semesterCount),
+            record.isGraduated,
+            record.degreeType,
+            record.major,
+            record.institution,
+            record.student,
+            record.enrollmentDate,
+            record.graduationDate
+        );
     }
 }
