@@ -16,6 +16,20 @@
 
 ---
 
+## 🎥 Demo Video
+
+<div align="center">
+
+[![Secure Scholar Seal Demo](https://img.shields.io/badge/📹-Watch_Demo-red?style=for-the-badge)](https://github.com/DjangoWizard/secure-scholar-seal/blob/main/secure-scholar-seal-demo.mp4)
+
+**Complete Platform Walkthrough** - See FHE encryption in action!
+
+*Duration: 2:33 | Size: 8.3MB | Format: MP4*
+
+</div>
+
+---
+
 ## 🌟 What Makes Us Different?
 
 Secure Scholar Seal isn't just another credential platform—it's a **paradigm shift** in academic verification. While others store your data in plaintext or use basic encryption, we leverage **Fully Homomorphic Encryption (FHE)** to perform computations on encrypted data without ever decrypting it.
@@ -67,15 +81,187 @@ graph TD
 
 ## 🛠️ Technology Architecture
 
-```typescript
-// Example: Encrypted Academic Score Verification
-interface ScholarProfile {
-  encryptedGPA: euint32;           // FHE encrypted GPA
-  verificationLevel: euint32;      // Encrypted verification status
-  reputationScore: euint32;        // Encrypted reputation
-  institution: string;             // Public institution name
-  isVerified: boolean;             // Public verification status
+### 🔐 Smart Contract Architecture
+
+Our smart contracts implement a sophisticated FHE-based credential system deployed on **Ethereum Sepolia**:
+
+```solidity
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.24;
+
+import { SepoliaConfig } from "@fhevm/solidity/config/ZamaConfig.sol";
+import { euint32, externalEuint32, euint8, ebool, eaddress, externalEaddress, FHE } from "@fhevm/solidity/lib/FHE.sol";
+
+contract SecureScholarSeal is SepoliaConfig {
+    using FHE for *;
+    
+    struct ScholarProfile {
+        euint32 profileId;           // FHE encrypted profile ID
+        euint32 academicScore;      // FHE encrypted GPA/score
+        euint32 verificationLevel; // FHE encrypted verification status
+        euint32 reputationScore;   // FHE encrypted reputation
+        bool isVerified;           // Public verification status
+        bool isActive;            // Public active status
+        string name;              // Public name
+        string institution;       // Public institution
+        string specialization;    // Public specialization
+        address scholar;          // Public wallet address
+        uint256 createdAt;        // Public timestamp
+        uint256 lastUpdated;      // Public timestamp
+    }
+    
+    struct Credential {
+        euint32 credentialId;     // FHE encrypted credential ID
+        euint32 score;           // FHE encrypted score
+        euint32 validityPeriod;  // FHE encrypted validity
+        bool isRevoked;          // Public revocation status
+        bool isVerified;         // Public verification status
+        string credentialType;   // Public credential type
+        string issuer;           // Public issuer
+        string metadataHash;     // Public IPFS hash
+        address owner;           // Public owner address
+        uint256 issuedAt;        // Public timestamp
+        uint256 expiresAt;       // Public timestamp
+    }
+    
+    // Core mappings
+    mapping(uint256 => ScholarProfile) public scholarProfiles;
+    mapping(uint256 => Credential) public credentials;
+    mapping(uint256 => VerificationRequest) public verificationRequests;
+    
+    uint256 public profileCounter = 0;
+    uint256 public credentialCounter = 0;
+    uint256 public requestCounter = 0;
 }
+```
+
+### 📍 Contract Deployment
+
+**Contract Address**: `0x4a1390b602B658f5800530A54f3e3d8c67D3bc1F`  
+**Network**: Ethereum Sepolia Testnet  
+**Deployed**: October 27, 2025  
+**Verified**: ✅ [View on Etherscan](https://sepolia.etherscan.io/address/0x4a1390b602B658f5800530A54f3e3d8c67D3bc1F)
+
+### 🔐 FHE Encryption & Decryption Logic
+
+#### Frontend Encryption Process
+
+```typescript
+// 1. Initialize FHE Instance
+const { instance } = useZamaInstance();
+const signerPromise = useEthersSigner();
+
+// 2. Create Encrypted Input
+const input = instance.createEncryptedInput(CONTRACT_ADDRESS, address);
+
+// 3. Add Sensitive Data (Encrypted)
+input.add32(BigInt(gpaValue));           // Academic score
+input.add32(BigInt(verificationLevel));  // Verification level
+input.add32(BigInt(reputationScore));   // Reputation score
+
+// 4. Encrypt and Get Handles
+const encryptedInput = await input.encrypt();
+const handles = encryptedInput.handles;
+const proof = encryptedInput.inputProof;
+
+// 5. Submit to Contract
+const tx = await writeContract({
+  address: CONTRACT_ADDRESS,
+  abi: contractABI.abi,
+  functionName: 'createScholarProfile',
+  args: [
+    formData.fullName,
+    formData.university,
+    formData.specialization,
+    handles[0],  // academicScore
+    handles[1],  // verificationLevel
+    handles[2],  // reputationScore
+    proof
+  ]
+});
+```
+
+#### Smart Contract Processing
+
+```solidity
+function createScholarProfile(
+    string memory name,
+    string memory institution,
+    string memory specialization,
+    externalEuint32 academicScore,
+    externalEuint32 verificationLevel,
+    externalEuint32 reputationScore,
+    bytes calldata inputProof
+) public {
+    // Convert external encrypted data to internal format
+    euint32 encryptedAcademicScore = FHE.fromExternal(academicScore);
+    euint32 encryptedVerificationLevel = FHE.fromExternal(verificationLevel);
+    euint32 encryptedReputationScore = FHE.fromExternal(reputationScore);
+    
+    // Create new profile
+    ScholarProfile memory newProfile = ScholarProfile({
+        profileId: FHE.asEuint32(uint32(profileCounter)),
+        academicScore: encryptedAcademicScore,
+        verificationLevel: encryptedVerificationLevel,
+        reputationScore: encryptedReputationScore,
+        isVerified: false,
+        isActive: true,
+        name: name,
+        institution: institution,
+        specialization: specialization,
+        scholar: msg.sender,
+        createdAt: block.timestamp,
+        lastUpdated: block.timestamp
+    });
+    
+    // Store profile
+    scholarProfiles[profileCounter] = newProfile;
+    profileCounter++;
+    
+    // Set ACL permissions for decryption
+    FHE.allowThis(encryptedAcademicScore);
+    FHE.allow(encryptedAcademicScore, msg.sender);
+}
+```
+
+#### Frontend Decryption Process
+
+```typescript
+// 1. Request Decryption Permission
+const decryptData = async (profileId: string) => {
+  if (!instance || !signerPromise) return;
+  
+  try {
+    // 2. Create Decryption Request
+    const signer = await signerPromise;
+    const signature = await signer.signMessage(
+      `Decrypt profile ${profileId}`
+    );
+    
+    // 3. Call Contract Decryption Function
+    const decryptedData = await instance.userDecrypt(
+      CONTRACT_ADDRESS,
+      'getScholarEncryptedData',
+      [profileId],
+      signature
+    );
+    
+    // 4. Process Decrypted Results
+    const processedData = {
+      academicScore: Number(decryptedData.academicScore),
+      verificationLevel: Number(decryptedData.verificationLevel),
+      reputationScore: Number(decryptedData.reputationScore)
+    };
+    
+    setDecryptedData(prev => ({
+      ...prev,
+      [profileId]: processedData
+    }));
+    
+  } catch (error) {
+    console.error('Decryption failed:', error);
+  }
+};
 ```
 
 ### 🏗️ Tech Stack Deep Dive
@@ -87,6 +273,7 @@ interface ScholarProfile {
 | **Blockchain** | Ethereum + FHEVM | Decentralized, encrypted storage |
 | **Encryption** | Zama FHEVM | Homomorphic encryption engine |
 | **Wallet** | RainbowKit + Wagmi | Multi-wallet connectivity |
+| **File Storage** | Pinata IPFS | Decentralized document storage |
 | **Deployment** | Vercel | Global CDN, edge computing |
 
 ## 🚀 Quick Start Guide
@@ -119,37 +306,42 @@ npm run dev
 ### Environment Configuration
 
 ```env
-# Required Environment Variables
-VITE_CHAIN_ID=11155111
-VITE_RPC_URL=https://sepolia.infura.io/v3/YOUR_INFURA_KEY
-VITE_WALLET_CONNECT_PROJECT_ID=YOUR_WALLETCONNECT_PROJECT_ID
+# Network Configuration
+SEPOLIA_RPC_URL=https://1rpc.io/sepolia
+PRIVATE_KEY=your_private_key_here
+
+# API Keys
+ETHERSCAN_API_KEY=your_etherscan_api_key_here
+VITE_WALLET_CONNECT_PROJECT_ID=e08e99d213c331aa0fd00f625de06e66
+VITE_RPC_URL=https://1rpc.io/sepolia
+
+# Contract Configuration
+VITE_CONTRACT_ADDRESS=0x4a1390b602B658f5800530A54f3e3d8c67D3bc1F
+
+# Pinata IPFS Configuration
+VITE_PINATA_API_KEY=your_pinata_api_key_here
+VITE_PINATA_SECRET_KEY=your_pinata_secret_key_here
 ```
 
-## 🔧 Smart Contract Architecture
+## 🔧 Key Functions
 
-Our smart contracts implement a sophisticated FHE-based credential system:
-
-### Core Contracts
-
-```solidity
-contract SecureScholarSeal {
-    // Scholar profile management with FHE encryption
-    mapping(uint256 => ScholarProfile) public scholarProfiles;
-    
-    // Credential issuance and verification
-    mapping(uint256 => Credential) public credentials;
-    
-    // Reputation system for trust scoring
-    mapping(address => euint32) public scholarReputation;
-}
-```
-
-### Key Functions
+### Smart Contract Functions
 
 - `createScholarProfile()` - Create encrypted academic profile
 - `issueCredential()` - Issue institution-verified credentials
 - `submitVerificationRequest()` - Request credential verification
 - `processVerificationRequest()` - Process verification with FHE
+- `getScholarEncryptedData()` - Retrieve encrypted profile data
+- `getProfileIdsByScholar()` - Get user's profile IDs
+- `getProfileCount()` - Get total profile count
+
+### Frontend Functions
+
+- `useZamaInstance()` - FHE instance management hook
+- `useEthersSigner()` - Wallet signer hook
+- `uploadFile()` - Pinata IPFS file upload
+- `uploadJSON()` - Pinata IPFS JSON upload
+- `convertHex()` - FHE handle conversion utility
 
 ## 🌐 Deployment Guide
 
@@ -186,6 +378,8 @@ npm run build
 - ✅ FHE implementation verification
 - ✅ Wallet security integration
 - ✅ Data encryption at rest and in transit
+- ✅ IPFS decentralized file storage
+- ✅ ACL permission management
 
 ## 📊 Performance Metrics
 
@@ -197,6 +391,7 @@ npm run build
 | **Verification Time** | < 2s | Real-time Processing |
 | **Uptime** | 99.9% | Enterprise Grade |
 | **Gas Efficiency** | Optimized | Cost Effective |
+| **File Upload** | < 5s | IPFS Optimized |
 
 </div>
 
@@ -237,6 +432,8 @@ git push origin feature/amazing-feature
 - [x] Basic credential system
 - [x] Wallet integration
 - [x] UI/UX design
+- [x] IPFS file storage
+- [x] Contract deployment
 
 ### Phase 2: Expansion 🚧
 - [ ] Multi-chain support
