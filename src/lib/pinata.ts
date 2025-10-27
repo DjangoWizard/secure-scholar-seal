@@ -1,3 +1,5 @@
+import { useState } from 'react';
+
 // Pinata IPFS file upload utility
 export interface PinataResponse {
   IpfsHash: string;
