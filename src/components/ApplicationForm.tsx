@@ -36,6 +36,17 @@ export const ApplicationForm = () => {
     hash,
   });
 
+  // Debug logging for transaction states
+  React.useEffect(() => {
+    console.log('Transaction state:', {
+      hash,
+      isPending,
+      error,
+      isConfirming,
+      isConfirmed
+    });
+  }, [hash, isPending, error, isConfirming, isConfirmed]);
+
   // Contract address - deployed to Sepolia testnet
   const CONTRACT_ADDRESS = import.meta.env.VITE_CONTRACT_ADDRESS || '0x4a1390b602B658f5800530A54f3e3d8c67D3bc1F';
 
@@ -79,6 +90,7 @@ export const ApplicationForm = () => {
   // Handle transaction confirmation
   React.useEffect(() => {
     if (isConfirmed && hash) {
+      console.log('Transaction confirmed!', { hash, isConfirmed });
       toast({
         title: "Transaction Confirmed!",
         description: `Your scholarship application has been successfully submitted to the blockchain! Transaction: ${hash}`,
@@ -185,21 +197,28 @@ export const ApplicationForm = () => {
         throw new Error('Contract address not configured. Please set VITE_CONTRACT_ADDRESS in your environment.');
       }
       
-      console.log('Contract instance created, calling createScholarProfile...');
-      writeContract({
-        address: CONTRACT_ADDRESS as `0x${string}`,
-        abi: contractABI.abi,
-        functionName: 'createScholarProfile',
-        args: [
-          formData.fullName,
-          formData.university,
-          formData.essay, // specialization
-          handles[0], // academicScore
-          proof
-        ],
-      });
-      
-      console.log('Transaction submitted, waiting for confirmation...');
+                  console.log('Contract instance created, calling createScholarProfile...');
+                  writeContract({
+                    address: CONTRACT_ADDRESS as `0x${string}`,
+                    abi: contractABI.abi,
+                    functionName: 'createScholarProfile',
+                    args: [
+                      formData.fullName,
+                      formData.university,
+                      formData.essay, // specialization
+                      handles[0], // academicScore
+                      proof
+                    ],
+                  });
+                  
+                  console.log('Transaction submitted, waiting for confirmation...');
+                  console.log('Transaction args:', {
+                    fullName: formData.fullName,
+                    university: formData.university,
+                    specialization: formData.essay,
+                    academicScore: handles[0],
+                    proof: proof
+                  });
       
       toast({
         title: "Transaction Submitted",
