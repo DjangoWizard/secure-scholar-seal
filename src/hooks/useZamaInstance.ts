@@ -1,5 +1,26 @@
 import { useState, useEffect } from 'react';
-import { createInstance, initSDK, SepoliaConfig } from '@zama-fhe/relayer-sdk/bundle';
+
+async function loadFHE() {
+  try {
+    // Try bundle import first
+    const bundle = await import('@zama-fhe/relayer-sdk/bundle');
+    return {
+      createInstance: bundle.createInstance,
+      initSDK: bundle.initSDK,
+      SepoliaConfig: bundle.SepoliaConfig
+    };
+  } catch (e) {
+    // Fallback to global if CDN is loaded
+    if ((window as any).ZamaRelayerSDK) {
+      return {
+        createInstance: (window as any).ZamaRelayerSDK.createInstance,
+        initSDK: (window as any).ZamaRelayerSDK.initSDK,
+        SepoliaConfig: (window as any).ZamaRelayerSDK.SepoliaConfig
+      };
+    }
+    throw new Error('FHE SDK not available');
+  }
+}
 
 export function useZamaInstance() {
   const [instance, setInstance] = useState<any>(null);
@@ -22,16 +43,17 @@ export function useZamaInstance() {
       }
 
       console.log('Ethereum provider found, initializing SDK...');
-      await initSDK();
+      const fhe = await loadFHE();
+      await fhe.initSDK();
       console.log('SDK initialized successfully');
 
       const config = {
-        ...SepoliaConfig,
+        ...fhe.SepoliaConfig,
         network: (window as any).ethereum
       };
 
       console.log('Creating FHE instance with config:', config);
-      const zamaInstance = await createInstance(config);
+      const zamaInstance = await fhe.createInstance(config);
       console.log('FHE instance created successfully');
       
       setInstance(zamaInstance);
