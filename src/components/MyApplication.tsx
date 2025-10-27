@@ -93,20 +93,19 @@ export const MyApplication = () => {
       setHasProfileErrors(false);
       
       try {
+        // Use ethers directly like in aidwell-connect
+        const { Contract } = await import('ethers');
+        const signer = await signerPromise;
+        
+        if (!signer) {
+          throw new Error('No signer available');
+        }
+
+        const contract = new Contract(CONTRACT_ADDRESS, contractABI.abi, signer);
+        
         const profilePromises = profileIds.map(async (profileId: bigint) => {
           try {
-            // Use wagmi's readContract function directly
-            const { readContract } = await import('wagmi/actions');
-            const { getConfig } = await import('wagmi');
-            const config = getConfig();
-            
-            const profileData = await readContract(config, {
-              address: CONTRACT_ADDRESS as `0x${string}`,
-              abi: contractABI.abi,
-              functionName: 'getScholarEncryptedData',
-              args: [profileId],
-            });
-
+            const profileData = await contract.getScholarEncryptedData(profileId);
             console.log(`Profile data for ID ${profileId}:`, profileData);
             
             return {
@@ -144,7 +143,7 @@ export const MyApplication = () => {
     };
 
     loadProfiles();
-  }, [profileIds, CONTRACT_ADDRESS]);
+  }, [profileIds, CONTRACT_ADDRESS, signerPromise]);
 
 
   const decryptProfileData = async (profile: ScholarProfile) => {
