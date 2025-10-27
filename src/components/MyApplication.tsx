@@ -40,63 +40,6 @@ export const MyApplication = () => {
   const [decryptedData, setDecryptedData] = useState<Record<string, DecryptedData>>({});
   const [isDecrypting, setIsDecrypting] = useState<Record<string, boolean>>({});
   const [expandedProfile, setExpandedProfile] = useState<string | null>(null);
-  // Custom hook to read profile data for each profile ID
-  const useProfileData = (profileId: bigint | undefined) => {
-    return useReadContract({
-      address: CONTRACT_ADDRESS as `0x${string}`,
-      abi: contractABI.abi,
-      functionName: 'getScholarEncryptedData',
-      args: profileId !== undefined ? [profileId] : undefined,
-      query: {
-        enabled: profileId !== undefined,
-      },
-    });
-  };
-
-  // Create profile data queries for each profile ID
-  const profileDataQueries = useMemo(() => {
-    if (!profileIds || profileIds.length === 0) return [];
-    
-    return profileIds.map((profileId: bigint) => ({
-      profileId,
-      query: useProfileData(profileId)
-    }));
-  }, [profileIds]);
-
-  // Process profile data from queries
-  const profiles = useMemo(() => {
-    const processedProfiles: ScholarProfile[] = [];
-    
-    profileDataQueries.forEach(({ profileId, query }) => {
-      if (query.data && !query.isLoading && !query.error) {
-        const profileData = query.data;
-        console.log(`Profile data for ID ${profileId}:`, profileData);
-        
-        const profile: ScholarProfile = {
-          profileId: profileId.toString(),
-          academicScore: profileData.academicScore,
-          verificationLevel: profileData.verificationLevel,
-          reputationScore: profileData.reputationScore,
-          isVerified: profileData.isVerified,
-          isActive: profileData.isActive,
-          name: profileData.name,
-          institution: profileData.institution,
-          specialization: profileData.specialization,
-          scholar: profileData.scholar,
-          createdAt: new Date(Number(profileData.createdAt) * 1000).toLocaleString(),
-          lastUpdated: new Date(Number(profileData.lastUpdated) * 1000).toLocaleString(),
-        };
-        processedProfiles.push(profile);
-      }
-    });
-    
-    console.log('Processed profiles from contract:', processedProfiles);
-    return processedProfiles;
-  }, [profileDataQueries]);
-
-  // Check if any queries are still loading
-  const isLoadingProfiles = profileDataQueries.some(({ query }) => query.isLoading);
-  const hasProfileErrors = profileDataQueries.some(({ query }) => query.error);
 
   const CONTRACT_ADDRESS = import.meta.env.VITE_CONTRACT_ADDRESS || '0x4a1390b602B658f5800530A54f3e3d8c67D3bc1F';
 
@@ -108,6 +51,16 @@ export const MyApplication = () => {
     args: address ? [address] : undefined,
     query: {
       enabled: !!address && isConnected,
+    },
+  });
+
+  // Read profile count (for display, if needed)
+  const { data: profileCount } = useReadContract({
+    address: CONTRACT_ADDRESS as `0x${string}`,
+    abi: contractABI.abi,
+    functionName: 'getProfileCount',
+    query: {
+      enabled: !!CONTRACT_ADDRESS,
     },
   });
 
@@ -123,15 +76,74 @@ export const MyApplication = () => {
     });
   }, [profileIds, isLoadingProfileIds, profileIdsError, address, isConnected, CONTRACT_ADDRESS]);
 
-  // Read profile count
-  const { data: profileCount } = useReadContract({
-    address: CONTRACT_ADDRESS as `0x${string}`,
-    abi: contractABI.abi,
-    functionName: 'getProfileCount',
-    query: {
-      enabled: !!CONTRACT_ADDRESS,
-    },
-  });
+  // Process profiles from profileIds - we'll fetch data manually
+  const [profiles, setProfiles] = useState<ScholarProfile[]>([]);
+  const [isLoadingProfiles, setIsLoadingProfiles] = useState(false);
+  const [hasProfileErrors, setHasProfileErrors] = useState(false);
+
+  // Load profile data when profileIds change
+  useEffect(() => {
+    const loadProfiles = async () => {
+      if (!profileIds || profileIds.length === 0) {
+        setProfiles([]);
+        return;
+      }
+
+      setIsLoadingProfiles(true);
+      setHasProfileErrors(false);
+      
+      try {
+        const profilePromises = profileIds.map(async (profileId: bigint) => {
+          try {
+            // Use wagmi's readContract function directly
+            const { readContract } = await import('wagmi/actions');
+            const config = await import('wagmi').then(m => m.getConfig());
+            
+            const profileData = await readContract(config, {
+              address: CONTRACT_ADDRESS as `0x${string}`,
+              abi: contractABI.abi,
+              functionName: 'getScholarEncryptedData',
+              args: [profileId],
+            });
+
+            console.log(`Profile data for ID ${profileId}:`, profileData);
+            
+            return {
+              profileId: profileId.toString(),
+              academicScore: profileData.academicScore,
+              verificationLevel: profileData.verificationLevel,
+              reputationScore: profileData.reputationScore,
+              isVerified: profileData.isVerified,
+              isActive: profileData.isActive,
+              name: profileData.name,
+              institution: profileData.institution,
+              specialization: profileData.specialization,
+              scholar: profileData.scholar,
+              createdAt: new Date(Number(profileData.createdAt) * 1000).toLocaleString(),
+              lastUpdated: new Date(Number(profileData.lastUpdated) * 1000).toLocaleString(),
+            };
+          } catch (error) {
+            console.error(`Could not fetch profile ${profileId}:`, error);
+            setHasProfileErrors(true);
+            return null;
+          }
+        });
+
+        const results = await Promise.all(profilePromises);
+        const validProfiles = results.filter((profile): profile is ScholarProfile => profile !== null);
+        
+        console.log('Processed profiles from contract:', validProfiles);
+        setProfiles(validProfiles);
+      } catch (error) {
+        console.error('Error loading profiles:', error);
+        setHasProfileErrors(true);
+      } finally {
+        setIsLoadingProfiles(false);
+      }
+    };
+
+    loadProfiles();
+  }, [profileIds, CONTRACT_ADDRESS]);
 
 
   const decryptProfileData = async (profile: ScholarProfile) => {
