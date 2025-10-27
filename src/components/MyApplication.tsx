@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useAccount, useReadContract } from 'wagmi';
 import { useZamaInstance } from '@/hooks/useZamaInstance';
 import { useEthersSigner } from '@/hooks/useEthersSigner';
@@ -7,7 +7,6 @@ import { Button } from '@/components/ui/button';
 import { Loader2, Lock, Unlock, FileText, GraduationCap, ExternalLink, User } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import contractABI from '@/lib/contractABI.json';
-import { Contract } from 'ethers';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
 import { Badge } from '@/components/ui/badge';
 
@@ -38,12 +37,66 @@ export const MyApplication = () => {
   const signerPromise = useEthersSigner();
   const { toast } = useToast();
 
-  const [profiles, setProfiles] = useState<ScholarProfile[]>([]);
-  const [isLoadingApplications, setIsLoadingApplications] = useState(false);
-  const [errorApplications, setErrorApplications] = useState<string | null>(null);
   const [decryptedData, setDecryptedData] = useState<Record<string, DecryptedData>>({});
   const [isDecrypting, setIsDecrypting] = useState<Record<string, boolean>>({});
   const [expandedProfile, setExpandedProfile] = useState<string | null>(null);
+  // Custom hook to read profile data for each profile ID
+  const useProfileData = (profileId: bigint | undefined) => {
+    return useReadContract({
+      address: CONTRACT_ADDRESS as `0x${string}`,
+      abi: contractABI.abi,
+      functionName: 'getScholarEncryptedData',
+      args: profileId !== undefined ? [profileId] : undefined,
+      query: {
+        enabled: profileId !== undefined,
+      },
+    });
+  };
+
+  // Create profile data queries for each profile ID
+  const profileDataQueries = useMemo(() => {
+    if (!profileIds || profileIds.length === 0) return [];
+    
+    return profileIds.map((profileId: bigint) => ({
+      profileId,
+      query: useProfileData(profileId)
+    }));
+  }, [profileIds]);
+
+  // Process profile data from queries
+  const profiles = useMemo(() => {
+    const processedProfiles: ScholarProfile[] = [];
+    
+    profileDataQueries.forEach(({ profileId, query }) => {
+      if (query.data && !query.isLoading && !query.error) {
+        const profileData = query.data;
+        console.log(`Profile data for ID ${profileId}:`, profileData);
+        
+        const profile: ScholarProfile = {
+          profileId: profileId.toString(),
+          academicScore: profileData.academicScore,
+          verificationLevel: profileData.verificationLevel,
+          reputationScore: profileData.reputationScore,
+          isVerified: profileData.isVerified,
+          isActive: profileData.isActive,
+          name: profileData.name,
+          institution: profileData.institution,
+          specialization: profileData.specialization,
+          scholar: profileData.scholar,
+          createdAt: new Date(Number(profileData.createdAt) * 1000).toLocaleString(),
+          lastUpdated: new Date(Number(profileData.lastUpdated) * 1000).toLocaleString(),
+        };
+        processedProfiles.push(profile);
+      }
+    });
+    
+    console.log('Processed profiles from contract:', processedProfiles);
+    return processedProfiles;
+  }, [profileDataQueries]);
+
+  // Check if any queries are still loading
+  const isLoadingProfiles = profileDataQueries.some(({ query }) => query.isLoading);
+  const hasProfileErrors = profileDataQueries.some(({ query }) => query.error);
 
   const CONTRACT_ADDRESS = import.meta.env.VITE_CONTRACT_ADDRESS || '0x4a1390b602B658f5800530A54f3e3d8c67D3bc1F';
 
@@ -80,57 +133,6 @@ export const MyApplication = () => {
     },
   });
 
-  // Load user's applications when profileIds change
-  useEffect(() => {
-    if (profileIds && profileIds.length > 0) {
-      loadUserApplications();
-    } else {
-      setProfiles([]);
-    }
-  }, [profileIds]);
-
-  const loadUserApplications = async () => {
-    if (!profileIds || profileIds.length === 0) {
-      console.log('No profile IDs found for user:', address);
-      setProfiles([]);
-      return;
-    }
-
-    console.log('Loading applications for profile IDs:', profileIds);
-    setIsLoadingApplications(true);
-    setErrorApplications(null);
-
-    try {
-      // For now, create placeholder profiles based on the profile IDs
-      // In a production app, you would use wagmi's useReadContract for each profile
-      const profiles: ScholarProfile[] = profileIds.map((profileId: bigint) => ({
-        profileId: profileId.toString(),
-        academicScore: "0x0000000000000000000000000000000000000000000000000000000000000000",
-        verificationLevel: "0x0000000000000000000000000000000000000000000000000000000000000000",
-        reputationScore: "0x0000000000000000000000000000000000000000000000000000000000000000",
-        name: `Profile ${profileId.toString()}`,
-        institution: "University",
-        specialization: "Field of Study",
-        scholar: address || "0x0000000000000000000000000000000000000000",
-        isVerified: false,
-        isActive: true,
-        createdAt: new Date().toISOString(),
-        lastUpdated: new Date().toISOString()
-      }));
-
-      console.log('Final profiles loaded:', profiles);
-      setProfiles(profiles);
-    } catch (err: any) {
-      console.error('Failed to load applications:', err);
-      toast({
-        title: "Error Loading Applications",
-        description: "Failed to load your scholarship applications.",
-        variant: "destructive"
-      });
-    } finally {
-      setIsLoadingApplications(false);
-    }
-  };
 
   const decryptProfileData = async (profile: ScholarProfile) => {
     if (!instance || !address || !signerPromise || !isInitialized) {
@@ -232,7 +234,7 @@ export const MyApplication = () => {
     );
   }
 
-  if (fheLoading || isLoadingApplications || isLoadingProfileIds) {
+  if (fheLoading || isLoadingProfileIds || isLoadingProfiles) {
     return (
       <section id="my-applications" className="py-16 bg-secondary/30">
         <div className="container mx-auto px-6">
@@ -260,7 +262,7 @@ export const MyApplication = () => {
     );
   }
 
-  if (fheError || errorApplications || profileIdsError) {
+  if (fheError || profileIdsError || hasProfileErrors) {
     return (
       <section id="my-applications" className="py-16 bg-secondary/30">
         <div className="container mx-auto px-6">
@@ -278,8 +280,8 @@ export const MyApplication = () => {
                 </CardDescription>
               </CardHeader>
               <CardContent className="p-8 text-center">
-                <p className="text-red-500">Error: {fheError?.message || errorApplications || profileIdsError?.message}</p>
-                <Button onClick={loadUserApplications} className="mt-4">Retry</Button>
+                <p className="text-red-500">Error: {fheError?.message || profileIdsError?.message || 'Failed to load profile data'}</p>
+                <Button onClick={() => window.location.reload()} className="mt-4">Retry</Button>
               </CardContent>
             </Card>
           </div>
